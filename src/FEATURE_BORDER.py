@@ -57,6 +57,8 @@ def compactness_score(mask):
     return min(float(compactness), 1.0)
 
 def convexity_score(mask):
+
+
     '''Calculate convexity score between 0 and 1,
     with 0 indicating a smoother border and 1 a more crooked border.
 

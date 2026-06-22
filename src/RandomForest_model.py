@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import joblib
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split, KFold, learning_curve, cross_validate
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (confusion_matrix, roc_auc_score, roc_curve, 
@@ -35,9 +35,9 @@ def RandomForest_model(features_path, prediction_results_path, model_path, featu
 
     kfold = KFold(n_splits=5, random_state=1907, shuffle=True)
 
-    # 2. Hyperparameter Tuning: Max Depth
+    # 2. Hyperparameter Tuning: Max Depth (With Overfitting Protection)
     base_n = 100
-    depth_range = range(1, 21)
+    depth_range = range(1, 11)
     depth_means = []
     depth_stds = []
 
@@ -45,25 +45,34 @@ def RandomForest_model(features_path, prediction_results_path, model_path, featu
     for d in depth_range:
         fold_aucs = []
         for train_idx, val_idx in kfold.split(X_train_scaled):
-            rf = RandomForestClassifier(n_estimators=base_n, max_depth=d, random_state=1907, n_jobs=-1)
+            rf = RandomForestClassifier(n_estimators=base_n, max_depth=d, min_samples_leaf=5, random_state=1907, n_jobs=-1)
             rf.fit(X_train_scaled[train_idx], np.ravel(y_train.iloc[train_idx]))
             probs = rf.predict_proba(X_train_scaled[val_idx])[:, 1]
             fold_aucs.append(roc_auc_score(y_train.iloc[val_idx], probs))
         depth_means.append(np.mean(fold_aucs))
         depth_stds.append(np.std(fold_aucs))
 
-    best_d_from_graph = depth_range[np.argmax(depth_means)]
+    # Tolerance Rule for Max Depth
+    absolute_best_d_idx = np.argmax(depth_means)
+    best_d_score = depth_means[absolute_best_d_idx]
+    depth_tolerance = 0.005 
     
+    best_d_from_graph = depth_range[absolute_best_d_idx]
+    for i, mean_score in enumerate(depth_means):
+        if mean_score >= (best_d_score - depth_tolerance):
+            best_d_from_graph = depth_range[i]
+            break
+
     plt.figure(figsize=(10, 6))
     plt.errorbar(depth_range, depth_means, yerr=depth_stds, fmt='-o', label='Mean AUC ±1 std')
-    plt.title(f'Cross-Validation: Max Depth (Optimal: {best_d_from_graph})')
+    plt.title(f'Cross-Validation: Max Depth (Selected Optimal: {best_d_from_graph})')
     plt.xlabel('max_depth')
     plt.ylabel('Mean ROC AUC')
     plt.grid(True)
     plt.savefig(os.path.join(figures_dir, 'CV_Max_Depth_Plot.png'))
     plt.show()
 
-    # 3. Hyperparameter Tuning: N Estimators
+    # 3. Hyperparameter Tuning: N Estimators (With Overfitting & Complexity Protection)
     n_test_range = [10, 50, 100, 200, 300, 400, 500, 600]
     n_means = []
     n_stds = []
@@ -72,18 +81,27 @@ def RandomForest_model(features_path, prediction_results_path, model_path, featu
     for n in n_test_range:
         fold_aucs = []
         for train_idx, val_idx in kfold.split(X_train_scaled):
-            rf = RandomForestClassifier(n_estimators=n, max_depth=best_d_from_graph, random_state=1907, n_jobs=-1)
+            rf = RandomForestClassifier(n_estimators=n, max_depth=best_d_from_graph, min_samples_leaf=5, random_state=1907, n_jobs=-1)
             rf.fit(X_train_scaled[train_idx], np.ravel(y_train.iloc[train_idx]))
             probs = rf.predict_proba(X_train_scaled[val_idx])[:, 1]
             fold_aucs.append(roc_auc_score(y_train.iloc[val_idx], probs))
         n_means.append(np.mean(fold_aucs))
         n_stds.append(np.std(fold_aucs))
 
-    best_n_from_graph = n_test_range[np.argmax(n_means)]
+    # Tolerance Rule for N Estimators
+    absolute_best_n_idx = np.argmax(n_means)
+    best_n_score = n_means[absolute_best_n_idx]
+    n_estimators_tolerance = 0.003 
+    
+    best_n_from_graph = n_test_range[absolute_best_n_idx]
+    for i, mean_score in enumerate(n_means):
+        if mean_score >= (best_n_score - n_estimators_tolerance):
+            best_n_from_graph = n_test_range[i]
+            break
 
     plt.figure(figsize=(10, 6))
     plt.errorbar(n_test_range, n_means, yerr=n_stds, fmt='-s', color='red', label='Mean AUC ±1 std')
-    plt.title(f'Cross-Validation: N Estimators (Optimal: {best_n_from_graph})')
+    plt.title(f'Cross-Validation: N Estimators (Selected Optimal: {best_n_from_graph})')
     plt.xlabel('n_estimators')
     plt.ylabel('Mean ROC AUC')
     plt.grid(True)
@@ -95,6 +113,7 @@ def RandomForest_model(features_path, prediction_results_path, model_path, featu
     classifier = RandomForestClassifier(
         n_estimators=best_n_from_graph,
         max_depth=best_d_from_graph,
+        min_samples_leaf=5,
         random_state=0,
         oob_score=True,
         n_jobs=-1
@@ -134,20 +153,73 @@ def RandomForest_model(features_path, prediction_results_path, model_path, featu
     plt.tight_layout()
     plt.savefig(os.path.join(figures_dir, 'RandomForest_CM_ROC.png'), dpi=300) 
     plt.show()
-    
-    # Final Metrics Output
-    acc = accuracy_score(y_test, y_pred)
-    rec = recall_score(y_test, y_pred)
-    prec = precision_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
 
-    print("\n" + "—"*30)
-    print(f"• Accuracy:  {acc:.4f}")
-    print(f"• Recall:    {rec:.4f}")
-    print(f"• AUC:       {final_auc:.4f}")
-    print(f"• Precision: {prec:.4f}")
-    print(f"• F1 Score:  {f1:.4f}")
-    print("—"*30)
+    # 7. Learning Curve Plot
+    print("Generating Learning Curve...")
+    max_train_samples = int(len(X_train_scaled) * (4 / 5))
+    train_sizes_param = np.linspace(10, max_train_samples, 10, dtype=int)
+    
+    train_sizes, train_scores, validation_scores = learning_curve(
+        estimator=RandomForestClassifier(
+            n_estimators=best_n_from_graph, 
+            max_depth=best_d_from_graph, 
+            min_samples_leaf=5, 
+            random_state=1907, 
+            n_jobs=-1
+        ),
+        X=X_train_scaled,
+        y=y_train,
+        train_sizes=train_sizes_param,
+        cv=kfold,
+        scoring='roc_auc',
+        n_jobs=-1
+    )
+
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    validation_scores_mean = np.mean(validation_scores, axis=1)
+    validation_scores_std = np.std(validation_scores, axis=1)
+
+    plt.figure(figsize=(11, 6))
+    plt.plot(train_sizes, train_scores_mean, 'o-', color='#1f77b4', label='Training AUC')
+    plt.fill_between(train_sizes, train_scores_mean - train_scores_std, train_scores_mean + train_scores_std, alpha=0.15, color='#1f77b4')
+    plt.plot(train_sizes, validation_scores_mean, 'o-', color='#ff7f0e', label='Validation AUC')
+    plt.fill_between(train_sizes, validation_scores_mean - validation_scores_std, validation_scores_mean + validation_scores_std, alpha=0.15, color='#ff7f0e')
+    
+    plt.title(f'Learning Curve (Random Forest, depth={best_d_from_graph})', fontsize=13)
+    plt.xlabel('Training Set Size', fontsize=11)
+    plt.ylabel('AUC Score', fontsize=11)
+    plt.grid(True)
+    plt.legend(loc='upper right', fontsize=11)
+    plt.tight_layout()
+    plt.savefig(os.path.join(figures_dir, 'Learning_Curve_Plot.png'), dpi=300)
+    plt.show()
+    
+    # Calculate variation (Standard Deviation) using Cross-Validation on the final model setup
+    scoring_metrics = ['accuracy', 'recall', 'roc_auc', 'precision', 'f1']
+    cv_results = cross_validate(
+        estimator=RandomForestClassifier(
+            n_estimators=best_n_from_graph,
+            max_depth=best_d_from_graph,
+            min_samples_leaf=5,
+            random_state=1907,
+            n_jobs=-1
+        ),
+        X=X_train_scaled,
+        y=y_train,
+        cv=kfold,
+        scoring=scoring_metrics,
+        n_jobs=-1
+    )
+
+    # Final Metrics Output with ± Variation (Standard Deviation)
+    print("\n" + "—"*40)
+    print(f"• Accuracy:  {np.mean(cv_results['test_accuracy']):.4f} ± {np.std(cv_results['test_accuracy']):.4f}")
+    print(f"• Recall:    {np.mean(cv_results['test_recall']):.4f} ± {np.std(cv_results['test_recall']):.4f}")
+    print(f"• AUC:       {np.mean(cv_results['test_roc_auc']):.4f} ± {np.std(cv_results['test_roc_auc']):.4f}")
+    print(f"• Precision: {np.mean(cv_results['test_precision']):.4f} ± {np.std(cv_results['test_precision']):.4f}")
+    print(f"• F1 Score:  {np.mean(cv_results['test_f1']):.4f} ± {np.std(cv_results['test_f1']):.4f}")
+    print("—"*40)
 
 if __name__ == "__main__":
     RandomForest_model(
@@ -157,6 +229,4 @@ if __name__ == "__main__":
         feature_names_path = '../result/models/feature_names.pkl',
         X_test_path = '../result/models/X_test.pkl',
         y_test_path = '../result/models/Y_test.pkl',
-
-
     )

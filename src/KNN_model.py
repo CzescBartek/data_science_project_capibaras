@@ -7,7 +7,6 @@ from sklearn.model_selection import train_test_split, KFold
 from sklearn.preprocessing import StandardScaler
 import joblib
 
-
 data = pd.read_csv('../data/features.csv')
 df = data.drop(['img_id'], axis=1)
 df = df.dropna(axis=0)
@@ -16,7 +15,7 @@ x = df.drop(['Cancerous'], axis=1)
 y = df[['Cancerous']]
 
 dev_x, test_x, dev_y, test_y = train_test_split(
-    x, y, stratify=y, random_state=0,test_size=0.2,
+    x, y, stratify=y, random_state=0, test_size=0.2,
 )
 
 scaler = StandardScaler()
@@ -44,8 +43,17 @@ for k in n_neighbors:
     cv_results.append(mean_auc)
     print(f"k={k}, Mean CV AUC: {mean_auc:.4f}")
 
-best_k = n_neighbors[np.argmax(cv_results)]
-print(f"Best k from Cross-Validation: {best_k}")
+absolute_best_k_idx = np.argmax(cv_results)
+best_k_score = cv_results[absolute_best_k_idx]
+k_tolerance = 0.005
+
+best_k = n_neighbors[absolute_best_k_idx]
+for i, mean_score in enumerate(cv_results):
+    if mean_score >= (best_k_score - k_tolerance):
+        best_k = n_neighbors[i]
+        break
+
+print(f"Best k from Cross-Validation (with tolerance): {best_k}")
 
 dev_x_scaled = scaler.fit_transform(dev_x)
 test_x_scaled = scaler.transform(test_x)
@@ -93,4 +101,4 @@ ax2.grid(True)
 plt.tight_layout()
 plt.savefig('../result/figures/KNN_CM_ROC_with', dpi=300, bbox_inches='tight') 
 plt.show()
-plt.close() 
+plt.close()

@@ -18,3 +18,4 @@ def hair_coverage(img_gray):
     coverage = hair_area / total_area
     
     return round(coverage, 4)
+
